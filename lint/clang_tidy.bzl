@@ -49,22 +49,30 @@ _DISABLED_FEATURES = [
 ]
 
 ClangTidyHintInfo = provider(
-    fields = ["skip_files", "skip_checks"]
+    fields = ["skip_files", "skip_checks", "command_line_args"]
 )
 
-def create_clang_tidy_hint_info(skip_files = [], skip_checks = []):
-    return ClangTidyHintInfo(skip_files = skip_files, skip_checks = skip_checks)
+def create_clang_tidy_hint_info(skip_files = [], skip_checks = [], command_line_args = []):
+    return ClangTidyHintInfo(
+        skip_files = skip_files,
+        skip_checks = skip_checks,
+        command_line_args = command_line_args
+     )
 
 
 def _clang_tidy_hint_impl(ctx):
-    return create_clang_tidy_hint_info(skip_files = ctx.files.skip_files, skip_checks = ctx.attr.skip_checks)
+    return create_clang_tidy_hint_info(
+        skip_files = ctx.files.skip_files,
+        skip_checks = ctx.attr.skip_checks,
+        command_line_args = ctx.attr.command_line_args,
+    )
 
 
 clang_tidy_hint = rule(
     attrs = {
-        #"skip_files": attr.string_list(),
         "skip_files": attr.label_list(allow_files = True),
         "skip_checks": attr.string_list(),
+        "command_line_args": attr.string_list(),
     },
     implementation = _clang_tidy_hint_impl,
 )
@@ -355,14 +363,11 @@ def clang_tidy_action(ctx, compilation_context, executable, srcs, stdout, exit_c
     env = _get_env(ctx, srcs)
     tools = [executable._clang_tidy_wrapper, executable._clang_tidy, find_cpp_toolchain(ctx).all_files]
 
-
     if hasattr(ctx.rule.attr, "aspect_hints"):
         for aspect_hint in ctx.rule.attr.aspect_hints:
-            files_to_skip = aspect_hint[ClangTidyHintInfo].skip_files
-            for file_to_skip in files_to_skip:
-                if not _is_source(file_to_skip):
-                    pass
-                    # TODO replace header filter regex with some additional exceptions...
+            new_args = aspect_hint[ClangTidyHintInfo].command_line_args
+            # TODO do not just append, replace when applicable
+            clang_tidy_args += new_args
 
     if patch != None:
         # Use run_patcher for fix mode
