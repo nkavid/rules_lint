@@ -48,6 +48,33 @@ _DISABLED_FEATURES = [
     "layering_check",
 ]
 
+ClangTidyHintInfo = provider(
+    fields = ["skip_files", "skip_checks"]
+)
+
+def create_clang_tidy_hint_info(skip_files = [], skip_checks = []):
+    return ClangTidyHintInfo(skip_files = skip_files, skip_checks = skip_checks)
+
+
+def _clang_tidy_hint_impl(ctx):
+    return create_clang_tidy_hint_info(skip_files = ctx.files.skip_files, skip_checks = ctx.attr.skip_checks)
+
+
+clang_tidy_hint = rule(
+    attrs = {
+        #"skip_files": attr.string_list(),
+        "skip_files": attr.label_list(allow_files = True),
+        "skip_checks": attr.string_list(),
+    },
+    implementation = _clang_tidy_hint_impl,
+)
+
+def create_clang_tidy_hint(target_name, **kwargs):
+    rule_name = target_name + "_clang_tidy_hint"
+    clang_tidy_hint(name = rule_name, **kwargs)
+    return rule_name
+
+
 def _gather_inputs(ctx, compilation_context, srcs):
     inputs = srcs + ctx.files._configs
     if (any(ctx.files._global_config)):
@@ -173,6 +200,7 @@ def _is_cxx(file):
     return not file.extension == "c"
 
 def _is_source(file):
+    # TODO ImplementationFileExtensions (and HeaderFileExtensions somewhere else) from global config?
     permitted_source_types = [
         "c",
         "cc",
@@ -327,6 +355,15 @@ def clang_tidy_action(ctx, compilation_context, executable, srcs, stdout, exit_c
     env = _get_env(ctx, srcs)
     tools = [executable._clang_tidy_wrapper, executable._clang_tidy, find_cpp_toolchain(ctx).all_files]
 
+
+    if hasattr(ctx.rule.attr, "aspect_hints"):
+        for aspect_hint in ctx.rule.attr.aspect_hints:
+            files_to_skip = aspect_hint[ClangTidyHintInfo].skip_files
+            for file_to_skip in files_to_skip:
+                if not _is_source(file_to_skip):
+                    pass
+                    # TODO replace header filter regex with some additional exceptions...
+
     if patch != None:
         # Use run_patcher for fix mode
         run_patcher(
@@ -386,6 +423,13 @@ def _clang_tidy_aspect_impl(target, ctx):
             compilation_contexts = [compilation_context] +
                                    [implementation_dep[CcInfo].compilation_context for implementation_dep in ctx.rule.attr.implementation_deps],
         )
+
+    if hasattr(ctx.rule.attr, "aspect_hints"):
+        for aspect_hint in ctx.rule.attr.aspect_hints:
+            files_to_skip = aspect_hint[ClangTidyHintInfo].skip_files
+            for file_to_skip in files_to_skip:
+                if _is_source(file_to_skip):
+                    files_to_lint.remove(file_to_skip)
 
     if len(files_to_lint) == 0:
         outputs, info = patch_and_output_files(_MNEMONIC, target, ctx)
